@@ -1,0 +1,81 @@
+<div class="app">
+  <header class="bar">
+    <h1>Sand Table</h1>
+    <div class="actions">
+      <button class="btn quiet" id="btn-sound" type="button" aria-pressed="true">Sound on</button>
+      <button class="btn quiet" id="btn-save" type="button">Save picture</button>
+      <button class="btn" id="btn-level" type="button">Level sand</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="tray" id="tray">
+      <canvas id="sand" aria-label="Sand tray. Drag to move the marble, rake, smooth or pour sand."></canvas>
+    </div>
+  </main>
+
+  <section class="options" aria-label="Tool options">
+    <div class="panel" id="panel-marble">
+      <div class="row" id="pattern-chips" role="group" aria-label="Pattern for the marble to trace">
+        <label class="chip upload" for="file-image">Upload image</label>
+        <input id="file-image" type="file" accept="image/*" class="visually-hidden">
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-play" type="button">Pause</button>
+        <label class="field" for="speed">Speed
+          <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1">
+        </label>
+        <label class="field" for="detail" id="detail-field" hidden>Detail
+          <input id="detail" type="range" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <button class="btn" id="btn-tint" type="button" hidden>Colour sand from image</button>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-rake" hidden>
+      <div class="row">
+        <span class="label" id="tines-label">Tines</span>
+        <div class="seg" id="tines" role="group" aria-labelledby="tines-label">
+          <button type="button" data-tines="3">3</button>
+          <button type="button" data-tines="5" aria-pressed="true">5</button>
+          <button type="button" data-tines="7">7</button>
+          <button type="button" data-tines="9">9</button>
+        </div>
+        <label class="field" for="rake-gap">Spacing
+          <input id="rake-gap" type="range" min="4" max="12" step="0.5" value="6.5">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-smooth" hidden>
+      <div class="row">
+        <label class="field" for="smooth-size">Hand size
+          <input id="smooth-size" type="range" min="8" max="40" step="1" value="20">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-pour" hidden>
+      <div class="row" id="swatches" role="group" aria-label="Sand colour">
+        <label class="swatch custom" for="custom-color" title="Pick any colour">
+          <input id="custom-color" type="color" value="#c9577a" aria-label="Pick any colour">
+        </label>
+      </div>
+      <div class="row">
+        <label class="field" for="pour-size">Stream
+          <input id="pour-size" type="range" min="4" max="30" step="1" value="12">
+        </label>
+        <button class="btn" id="btn-fill" type="button">Fill whole tray</button>
+      </div>
+    </div>
+
+    <p class="status" id="status" aria-live="polite"></p>
+  </section>
+
+  <nav class="tools" aria-label="Tools">
+    <button type="button" data-tool="marble" aria-pressed="true">Marble</button>
+    <button type="button" data-tool="rake">Rake</button>
+    <button type="button" data-tool="smooth">Smooth</button>
+    <button type="button" data-tool="pour">Pour</button>
+  </nav>
+</div>

@@ -1,0 +1,279 @@
+/* Layout: one screen. A walnut-rimmed tray fills the middle; quiet stone-grey controls sit under it. */
+:root {
+  --bg: #e2e5df;
+  --surface: #f2f4ef;
+  --fg: #252a26;
+  --muted: #59625b;
+  --line: #c3cac2;
+  --accent: #46654a;
+  --accent-fg: #f4f6f1;
+  --rim-a: #6a513e;
+  --rim-b: #3b2c21;
+  --rim-hi: rgba(255, 235, 210, 0.28);
+  --shadow: rgba(40, 46, 40, 0.28);
+  --font-display: "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a18;
+    --surface: #232926;
+    --fg: #e3e7e2;
+    --muted: #9aa49c;
+    --line: #37413b;
+    --accent: #a3c495;
+    --accent-fg: #132018;
+    --rim-a: #4d3a2c;
+    --rim-b: #261c15;
+    --rim-hi: rgba(255, 235, 210, 0.14);
+    --shadow: rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161a18;
+  --surface: #232926;
+  --fg: #e3e7e2;
+  --muted: #9aa49c;
+  --line: #37413b;
+  --accent: #a3c495;
+  --accent-fg: #132018;
+  --rim-a: #4d3a2c;
+  --rim-b: #261c15;
+  --rim-hi: rgba(255, 235, 210, 0.14);
+  --shadow: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+[hidden] {
+  display: none !important;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  box-sizing: border-box;
+  height: 100%;
+  max-width: 1180px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+}
+h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.45rem;
+  letter-spacing: 0.02em;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+}
+.tray {
+  position: relative;
+  padding: 9px;
+  border-radius: 22px;
+  background: linear-gradient(150deg, var(--rim-a), var(--rim-b));
+  box-shadow: 0 12px 28px var(--shadow), inset 0 1px 0 var(--rim-hi);
+}
+.tray::after {
+  /* the wall's shadow falling onto the sand */
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 14px;
+  box-shadow: inset 3px 4px 9px rgba(30, 20, 10, 0.5), inset -1px -1px 3px rgba(255, 240, 220, 0.25);
+  pointer-events: none;
+}
+#sand {
+  display: block;
+  border-radius: 14px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+}
+.status {
+  margin: 0;
+  min-height: 1.35em;
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+.label {
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+
+.btn,
+.chip,
+.seg button,
+.tools button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.btn.quiet {
+  background: transparent;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 700;
+  min-width: 6.5em;
+}
+.chip[aria-pressed="true"],
+.seg button[aria-pressed="true"] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+.chip.upload {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+.seg {
+  display: flex;
+  gap: 4px;
+}
+.seg button {
+  padding: 7px 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+.field input[type="range"] {
+  width: 120px;
+  max-width: 34vw;
+  accent-color: var(--accent);
+}
+
+.swatch {
+  box-sizing: border-box;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  cursor: pointer;
+}
+.swatch[aria-pressed="true"] {
+  border-color: var(--fg);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--fg);
+}
+.swatch.custom {
+  display: inline-block;
+  overflow: hidden;
+  background: conic-gradient(#d9534f, #e8b23a, #6fae5a, #3fa3a8, #5266b8, #a45bb0, #d9534f);
+}
+.swatch.custom input {
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.tools button {
+  border-radius: 14px;
+  padding: 11px 6px;
+  font-weight: 500;
+}
+.tools button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 700;
+}
+
+:is(button, input, .chip):focus-visible,
+.swatch.custom:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-height: 620px) {
+  h1 {
+    font-size: 1.15rem;
+  }
+  .btn,
+  .chip,
+  .seg button {
+    padding: 5px 11px;
+  }
+  .tools button {
+    padding: 8px 6px;
+  }
+}
