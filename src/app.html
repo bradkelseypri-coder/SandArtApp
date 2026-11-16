@@ -16,19 +16,26 @@
 
   <section class="options" aria-label="Tool options">
     <div class="panel" id="panel-marble">
-      <div class="row" id="pattern-chips" role="group" aria-label="Pattern for the marble to trace">
+      <div class="row" id="pattern-chips" role="group" aria-label="Add to the playlist">
+        <span class="label">Add</span>
         <label class="chip upload" for="file-image">Upload image</label>
         <input id="file-image" type="file" accept="image/*" class="visually-hidden">
       </div>
       <div class="row">
+        <span class="label">Playlist</span>
+        <div class="row" id="playlist" role="list"></div>
+      </div>
+      <div class="row">
         <button class="btn primary" id="btn-play" type="button">Pause</button>
+        <button class="btn" id="btn-next" type="button">Next</button>
+        <button class="btn" id="btn-repeat" type="button" aria-pressed="true">Repeat</button>
         <label class="field" for="speed">Speed
           <input id="speed" type="range" min="0.4" max="3" step="0.1" value="1">
         </label>
         <label class="field" for="detail" id="detail-field" hidden>Detail
           <input id="detail" type="range" min="0" max="1" step="0.05" value="0.5">
         </label>
-        <button class="btn" id="btn-tint" type="button" hidden>Colour sand from image</button>
+        <button class="btn" id="btn-tint" type="button" aria-pressed="false" hidden>Use image colours</button>
       </div>
     </div>
 
@@ -42,7 +49,10 @@
           <button type="button" data-tines="9">9</button>
         </div>
         <label class="field" for="rake-gap">Spacing
-          <input id="rake-gap" type="range" min="4" max="12" step="0.5" value="6.5">
+          <input id="rake-gap" type="range" min="4" max="14" step="0.5" value="6.5">
+        </label>
+        <label class="field" for="tine-size">Tine size
+          <input id="tine-size" type="range" min="1" max="4" step="0.25" value="1.75">
         </label>
       </div>
     </div>
@@ -66,6 +76,7 @@
           <input id="pour-size" type="range" min="4" max="30" step="1" value="12">
         </label>
         <button class="btn" id="btn-fill" type="button">Fill whole tray</button>
+        <button class="btn" id="btn-reset-colour" type="button">Reset colour</button>
       </div>
     </div>
 

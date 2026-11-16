@@ -1,7 +1,7 @@
 import { SandTable, type RGB } from "./engine/sand.ts";
 import { SandRenderer } from "./engine/render.ts";
 import { Marble, PathFollower, type Point } from "./engine/marble.ts";
-import { PATTERNS, buildPattern, type PatternId } from "./engine/patterns.ts";
+import { PATTERNS, buildPattern, buildWipe, type PatternId } from "./engine/patterns.ts";
 import { traceImage, toPlanes } from "./engine/imageTrace.ts";
 import { SandSound } from "./engine/audio.ts";
 
@@ -22,7 +22,7 @@ const SAND_COLOURS: { name: string; hex: string }[] = [
 ];
 
 const HINTS: Record<Tool, string> = {
-  marble: "Pick a pattern, or drag on the sand and the magnet pulls the marble after you.",
+  marble: "Add patterns or images to the playlist. The marble clears the sand before each one.",
   rake: "Drag slowly across the sand. The rake turns to follow your hand.",
   smooth: "Rub the sand to pat it flat.",
   pour: "Hold to pour coloured sand. Rake or roll through it to blend.",
@@ -31,6 +31,9 @@ const HINTS: Record<Tool, string> = {
 const CELLS = 190_000; // sand grid size, split to match the tray's shape
 const MARBLE_RADIUS = 4;
 const BASE_SPEED = 85; // cells per second
+const WIPE_SPEED = 320; // the clearing pass is brisk
+const HOLD_SECONDS = 6; // a finished drawing rests this long before it is cleared
+const MAX_ITEMS = 8;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("sand");
@@ -58,77 +61,223 @@ const sound = new SandSound();
 
 let tool: Tool = "marble";
 let follower: PathFollower | null = null;
-let route: Point[] = []; // the pattern as chosen, before the run-in from the marble
-let playing = false;
-let showPreview = false;
 let levelling = false;
 let needsDraw = true;
 let scale = 1; // canvas pixels per sand cell
 
+let baseColour: RGB = hexToRgb(SAND_COLOURS[0].hex); // what the clearing pass returns the sand to
 let pourColour: RGB = hexToRgb(SAND_COLOURS[7].hex);
 let tines = 5;
 
+// ---------- the playlist ----------
+// The marble works through a list of patterns and pictures. Before each one it
+// makes a clearing pass, so every drawing starts on clean sand.
+
 type Picture = { planes: Float32Array[]; w: number; h: number; source: HTMLCanvasElement };
-let picture: Picture | null = null;
+type Item = {
+  label: string;
+  kind: PatternId | "image";
+  route: Point[];
+  picture?: Picture;
+  detail: number;
+  tint: boolean;
+};
+type Phase = "idle" | "wipe" | "draw" | "hold";
+
+const playlist: Item[] = [];
+let cur = -1; // the item being drawn, or just drawn
+let selected: Item | null = null; // the item whose route is previewed and whose settings show
+let phase: Phase = "idle";
+let playing = false;
+let repeat = true;
+let holdLeft = 0;
+let reliefDirty = false; // grooves on the sand
+let colourDirty = false; // colour on the sand
+let imageCount = 0;
 
 function setStatus(text?: string) {
-  statusEl.textContent = text ?? HINTS[tool];
+  statusEl.textContent = text ?? (tool === "marble" ? playlistStatus() : HINTS[tool]);
 }
 
-// ---------- routes for the marble ----------
+function playlistStatus() {
+  const item = playlist[cur];
+  if (!item || phase === "idle") return HINTS.marble;
+  const next = playlist.length > 1 ? playlist[(cur + 1) % playlist.length] : null;
+  const after = next && (repeat || cur + 1 < playlist.length) ? next.label : null;
+  if (phase === "wipe") return `Clearing the sand for ${item.label}.`;
+  if (phase === "hold") return after ? `${item.label} is finished. ${after} is next.` : `${item.label} is finished.`;
+  return after ? `Drawing ${item.label}. Next: ${after}.` : `Drawing ${item.label}.`;
+}
 
-function setRoute(points: Point[], autoplay: boolean) {
-  route = points;
+function speed() {
+  return Number($<HTMLInputElement>("speed").value);
+}
+
+function fromMarble(points: Point[]) {
   // the marble can't jump: it rolls from where it is to the start of the route
-  follower = new PathFollower([{ x: marble.x, y: marble.y }, ...points]);
-  playing = autoplay && points.length > 1;
-  showPreview = !playing;
-  needsDraw = true;
-  updatePlayButton();
+  return new PathFollower([{ x: marble.x, y: marble.y }, ...points]);
 }
 
-function updatePlayButton() {
-  playBtn.textContent = playing ? "Pause" : follower && !follower.done && follower.travelled > 0 ? "Resume" : "Trace";
-  playBtn.disabled = route.length < 2;
-}
-
-function choosePattern(id: PatternId | "image", autoplay = true) {
-  for (const chip of document.querySelectorAll<HTMLElement>("#pattern-chips [data-pattern]")) {
-    chip.setAttribute("aria-pressed", String(chip.dataset.pattern === id));
+function startItem(i: number) {
+  cur = i;
+  if (selected === playlist[i]) selected = null;
+  playing = true;
+  if (reliefDirty || colourDirty) {
+    phase = "wipe";
+    follower = fromMarble(buildWipe(GW, GH, MARBLE_RADIUS + 2, marble.wipeRadius * 1.1));
+  } else {
+    beginDraw();
   }
-  const isImage = id === "image";
+  refreshPlaylist();
+}
+
+function beginDraw() {
+  const item = playlist[cur];
+  if (item.tint && item.picture) {
+    tintFromPicture(item.picture);
+    colourDirty = true;
+  }
+  reliefDirty = true;
+  phase = "draw";
+  follower = fromMarble(item.route);
+}
+
+/** Move on to the following item. `wrap` goes back to the first after the last. */
+function nextItem(wrap: boolean) {
+  if (playlist.length === 0) return stopPlaylist();
+  let n = cur + 1;
+  if (n >= playlist.length) {
+    if (!wrap) return stopPlaylist();
+    n = 0;
+  }
+  startItem(n);
+}
+
+function stopPlaylist() {
+  phase = "idle";
+  playing = false;
+  follower = null;
+  refreshPlaylist();
+}
+
+function addItem(item: Item) {
+  if (playlist.length >= MAX_ITEMS) {
+    setStatus(`The playlist holds ${MAX_ITEMS}. Remove one to add another.`);
+    return false;
+  }
+  playlist.push(item);
+  return true;
+}
+
+function removeItem(item: Item) {
+  const i = playlist.indexOf(item);
+  if (i < 0) return;
+  playlist.splice(i, 1);
+  if (selected === item) selected = null;
+  if (i < cur) {
+    cur--;
+  } else if (i === cur) {
+    cur--;
+    if (phase !== "idle" && playing) return nextItem(repeat);
+    phase = "idle";
+    follower = null;
+  }
+  refreshPlaylist();
+}
+
+function selectItem(item: Item | null) {
+  selected = selected === item ? null : item;
+  refreshPlaylist();
+  if (selected && selected.kind === "image") describeTrace(selected);
+}
+
+function refreshPlaylist() {
+  const box = $("playlist");
+  box.textContent = "";
+  playlist.forEach((item, i) => {
+    const el = document.createElement("span");
+    el.className = "item" + (item === selected ? " selected" : "");
+    el.setAttribute("role", "listitem");
+    if (i === cur && phase !== "idle") el.setAttribute("aria-current", "true");
+    const name = document.createElement("button");
+    name.type = "button";
+    name.textContent = item.label;
+    name.title = "Show the line the marble will follow";
+    name.addEventListener("click", () => selectItem(item));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove";
+    remove.textContent = "\u00d7";
+    remove.setAttribute("aria-label", `Remove ${item.label}`);
+    remove.addEventListener("click", () => removeItem(item));
+    el.append(name, remove);
+    box.append(el);
+  });
+  if (playlist.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "label";
+    empty.textContent = "Empty. Add a pattern or upload an image.";
+    box.append(empty);
+  }
+  const isImage = selected?.kind === "image";
   $("detail-field").hidden = !isImage;
   $("btn-tint").hidden = !isImage;
   if (isImage) {
-    traceCurrentPicture();
+    $<HTMLInputElement>("detail").value = String(selected!.detail);
+    $("btn-tint").setAttribute("aria-pressed", String(selected!.tint));
+  }
+  playBtn.textContent = playing ? "Pause" : phase === "idle" ? "Play" : "Resume";
+  playBtn.disabled = playlist.length === 0;
+  $<HTMLButtonElement>("btn-next").disabled = playlist.length === 0;
+  needsDraw = true;
+  setStatus();
+}
+
+function addPattern(id: PatternId) {
+  const label = PATTERNS.find((p) => p.id === id)!.label;
+  const item: Item = {
+    label,
+    kind: id,
+    route: buildPattern(id, GW, GH, MARBLE_RADIUS * 3, MARBLE_RADIUS * 3),
+    detail: 0,
+    tint: false,
+  };
+  if (!addItem(item)) return;
+  if (phase === "idle") {
+    startItem(playlist.length - 1);
   } else {
-    setRoute(buildPattern(id, GW, GH, MARBLE_RADIUS * 3, MARBLE_RADIUS * 3), autoplay);
-    setStatus();
+    refreshPlaylist();
+    setStatus(`${label} added. It plays after ${playlist[playlist.length - 2].label}.`);
   }
 }
 
-/** Where the uploaded picture sits on the tray: centred, as large as fits. */
+/** Where an uploaded picture sits on the tray: centred, as large as fits. */
 function pictureRect(p: { w: number; h: number }) {
   const margin = MARBLE_RADIUS * 3;
   const s = Math.min((GW - 2 * margin) / p.w, (GH - 2 * margin) / p.h);
   return { s, x: (GW - p.w * s) / 2, y: (GH - p.h * s) / 2 };
 }
 
-function traceCurrentPicture() {
-  if (!picture) return;
-  const detail = Number($<HTMLInputElement>("detail").value);
-  const pts = traceImage(picture.planes, picture.w, picture.h, detail);
-  const r = pictureRect(picture);
-  setRoute(
-    pts.map((p) => ({ x: r.x + (p.x + 0.5) * r.s, y: r.y + (p.y + 0.5) * r.s })),
-    false,
-  );
-  if (pts.length < 2) {
+function traceItem(item: Item) {
+  const pic = item.picture!;
+  const r = pictureRect(pic);
+  item.route = traceImage(pic.planes, pic.w, pic.h, item.detail).map((p) => ({
+    x: r.x + (p.x + 0.5) * r.s,
+    y: r.y + (p.y + 0.5) * r.s,
+  }));
+}
+
+function describeTrace(item: Item) {
+  if (item.route.length < 2) {
     setStatus("No clear outlines found in this picture. Raise Detail, or try one with stronger contrast.");
-  } else {
-    const secs = Math.round(follower!.total / (BASE_SPEED * speed()));
-    setStatus(`This is the line the marble will follow, about ${formatTime(secs)}. Adjust Detail, then press Trace.`);
+    return;
   }
+  let len = 0;
+  for (let i = 1; i < item.route.length; i++) {
+    len += Math.hypot(item.route[i].x - item.route[i - 1].x, item.route[i].y - item.route[i - 1].y);
+  }
+  const when = phase === "idle" ? "Press Play to draw it." : "It plays when its turn comes.";
+  setStatus(`This is the line the marble will follow, about ${formatTime(len / (BASE_SPEED * speed()))}. ${when}`);
 }
 
 function formatTime(secs: number) {
@@ -156,14 +305,20 @@ async function loadPicture(file: File) {
     // outlines are found on a small copy: finer detail than the marble's groove would be lost anyway
     const small = draw(210);
     const data = small.getContext("2d")!.getImageData(0, 0, small.width, small.height).data;
-    picture = { planes: toPlanes(data, small.width, small.height), w: small.width, h: small.height, source: draw(800) };
-
-    let chip = document.querySelector<HTMLElement>('#pattern-chips [data-pattern="image"]');
-    if (!chip) {
-      chip = makeChip("image", "Your image");
-      $("pattern-chips").insertBefore(chip, $("pattern-chips").firstChild);
-    }
-    choosePattern("image");
+    const item: Item = {
+      label: `Image ${imageCount + 1}`,
+      kind: "image",
+      route: [],
+      picture: { planes: toPlanes(data, small.width, small.height), w: small.width, h: small.height, source: draw(800) },
+      detail: 0.5,
+      tint: false,
+    };
+    traceItem(item);
+    if (!addItem(item)) return;
+    imageCount++;
+    selected = item;
+    refreshPlaylist();
+    describeTrace(item);
   } catch {
     setStatus("That file couldn't be read as a picture. Try a JPG or PNG.");
   } finally {
@@ -171,20 +326,14 @@ async function loadPicture(file: File) {
   }
 }
 
-function tintFromPicture() {
-  if (!picture) return;
+function tintFromPicture(pic: Picture) {
   const c = document.createElement("canvas");
   c.width = GW;
   c.height = GH;
   const g = c.getContext("2d")!;
-  const r = pictureRect(picture);
-  g.drawImage(picture.source, r.x, r.y, picture.w * r.s, picture.h * r.s);
+  const r = pictureRect(pic);
+  g.drawImage(pic.source, r.x, r.y, pic.w * r.s, pic.h * r.s);
   table.tint(g.getImageData(0, 0, GW, GH).data, 0.85);
-  setStatus("The sand has taken the picture's colours. Press Trace to draw its outlines through them.");
-}
-
-function speed() {
-  return Number($<HTMLInputElement>("speed").value);
 }
 
 // ---------- pointer tools ----------
@@ -215,10 +364,11 @@ canvas.addEventListener("pointerdown", (e) => {
     // the finger takes over the magnet
     if (playing) {
       playing = false;
-      updatePlayButton();
+      refreshPlaylist();
     }
-    showPreview = false;
+    marble.mode = "draw";
     marble.pull = 150;
+    reliefDirty = true;
     marble.tx = pointer.x;
     marble.ty = pointer.y;
   }
@@ -244,9 +394,12 @@ canvas.addEventListener("pointermove", (e) => {
   }
   toolSpeed += dist;
   strokeLen += dist;
+  if (tool === "pour") colourDirty = true;
+  else reliefDirty = true;
 
   if (tool === "rake") {
     const gap = Number($<HTMLInputElement>("rake-gap").value);
+    const size = Number($<HTMLInputElement>("tine-size").value);
     const n = Math.ceil(dist / 0.9);
     for (let i = 1; i <= n; i++) {
       // turn the rake head gradually, like a real one dragged through sand
@@ -261,7 +414,7 @@ canvas.addEventListener("pointermove", (e) => {
       const cy = last.y + (dy * i) / n;
       for (let t = 0; t < tines; t++) {
         const off = (t - (tines - 1) / 2) * gap;
-        table.carve(cx - dir.y * off, cy + dir.x * off, 1.7, 1.25, dir.x, dir.y);
+        table.carve(cx - dir.y * off, cy + dir.x * off, size, size * 0.72, dir.x, dir.y);
       }
     }
   } else if (tool === "smooth") {
@@ -310,7 +463,8 @@ function draw() {
   ctx.drawImage(renderer.canvas, 0, 0, canvas.width, canvas.height);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  if (showPreview && route.length > 1) {
+  const route = selected && !(selected === playlist[cur] && phase !== "idle" && phase !== "wipe") ? selected.route : [];
+  if (route.length > 1) {
     ctx.beginPath();
     ctx.moveTo(route[0].x, route[0].y);
     for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y);
@@ -347,7 +501,7 @@ function drawRake() {
   for (let t = 0; t < tines; t++) {
     const off = (t - (tines - 1) / 2) * gap;
     ctx.beginPath();
-    ctx.arc(last.x + px * off, last.y + py * off, 1.1, 0, Math.PI * 2);
+    ctx.arc(last.x + px * off, last.y + py * off, Number($<HTMLInputElement>("tine-size").value) * 0.65, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -391,16 +545,30 @@ function drawMarble() {
 // ---------- the loop ----------
 
 function advance(dt: number) {
-  if (playing && follower) {
-    marble.pull = 900;
-    const target = follower.advance(BASE_SPEED * speed() * dt);
+  if (playing && phase === "hold") {
+    holdLeft -= dt;
+    if (holdLeft <= 0) nextItem(repeat);
+  } else if (playing && follower) {
+    // the run-in to a drawing's first point is made in clearing mode, so it leaves no stray line
+    const wiping = phase === "wipe" || follower.segment === 0;
+    marble.mode = wiping ? "wipe" : "draw";
+    marble.wipeTo = baseColour;
+    marble.pull = phase === "wipe" ? 6000 : 900;
+    const target = follower.advance((phase === "wipe" ? WIPE_SPEED : BASE_SPEED * speed()) * dt);
     marble.tx = target.x;
     marble.ty = target.y;
     if (follower.done && marble.speed < 1.5) {
-      playing = false;
-      updatePlayButton();
-      if (tool === "marble") setStatus("Finished. Level the sand and trace again, or rake through it.");
+      if (phase === "wipe") {
+        reliefDirty = colourDirty = false;
+        beginDraw();
+      } else {
+        phase = "hold";
+        holdLeft = HOLD_SECONDS;
+      }
+      refreshPlaylist();
     }
+  } else {
+    marble.mode = "draw";
   }
   marble.step(dt, table);
 }
@@ -417,11 +585,12 @@ function frame(now: number) {
   if (dragging && tool === "pour") {
     // keep pouring while the hand holds still
     table.pour(pointer.x, pointer.y, Number($<HTMLInputElement>("pour-size").value), pourColour, 0.12);
+    colourDirty = true;
     toolSpeed += 0.6;
   }
   if (levelling) {
     levelling = table.settle(0.86);
-    if (!levelling) marble.rest(table);
+    if (!levelling) reliefDirty = false;
   }
 
   const moving = marble.speed > 0.05;
@@ -439,23 +608,19 @@ function frame(now: number) {
 
 // ---------- controls ----------
 
-function makeChip(id: string, label: string) {
+const chips = $("pattern-chips");
+const uploadChip = chips.querySelector(".upload")!;
+for (const p of PATTERNS) {
   const b = document.createElement("button");
   b.type = "button";
   b.className = "chip";
-  b.dataset.pattern = id;
-  b.textContent = label;
-  b.setAttribute("aria-pressed", "false");
+  b.textContent = p.label;
   b.addEventListener("click", () => {
     sound.unlock();
-    choosePattern(id as PatternId | "image");
+    addPattern(p.id);
   });
-  return b;
+  chips.insertBefore(b, uploadChip);
 }
-
-const chips = $("pattern-chips");
-const uploadChip = chips.firstElementChild!;
-for (const p of PATTERNS) chips.insertBefore(makeChip(p.id, p.label), uploadChip);
 
 $<HTMLInputElement>("file-image").addEventListener("change", (e) => {
   const input = e.target as HTMLInputElement;
@@ -467,22 +632,50 @@ $<HTMLInputElement>("file-image").addEventListener("change", (e) => {
 let detailTimer = 0;
 $("detail").addEventListener("input", () => {
   clearTimeout(detailTimer);
-  detailTimer = window.setTimeout(traceCurrentPicture, 120);
+  detailTimer = window.setTimeout(() => {
+    if (!selected || selected.kind !== "image") return;
+    selected.detail = Number($<HTMLInputElement>("detail").value);
+    traceItem(selected);
+    needsDraw = true;
+    describeTrace(selected);
+  }, 120);
 });
-$("btn-tint").addEventListener("click", tintFromPicture);
+$("btn-tint").addEventListener("click", () => {
+  if (!selected) return;
+  selected.tint = !selected.tint;
+  $("btn-tint").setAttribute("aria-pressed", String(selected.tint));
+  setStatus(
+    selected.tint
+      ? "The sand will take this picture's colours before the marble draws it."
+      : "This picture will be drawn in plain sand.",
+  );
+});
 
 playBtn.addEventListener("click", () => {
   sound.unlock();
   if (playing) {
     playing = false;
+  } else if (phase === "idle") {
+    const i = selected ? playlist.indexOf(selected) : -1;
+    if (i >= 0) startItem(i);
+    else nextItem(true);
+    return;
   } else {
-    if (!follower || follower.done) setRoute(route, true);
     playing = true;
-    showPreview = false;
-    setStatus();
   }
-  needsDraw = true;
-  updatePlayButton();
+  refreshPlaylist();
+});
+
+$("btn-next").addEventListener("click", () => {
+  sound.unlock();
+  nextItem(true);
+});
+
+const repeatBtn = $("btn-repeat");
+repeatBtn.addEventListener("click", () => {
+  repeat = !repeat;
+  repeatBtn.setAttribute("aria-pressed", String(repeat));
+  setStatus(repeat ? "The playlist starts over when it reaches the end." : "The playlist stops after its last drawing.");
 });
 
 for (const b of document.querySelectorAll<HTMLButtonElement>(".tools button")) {
@@ -527,13 +720,20 @@ customInput.addEventListener("click", () => pickColour(customInput.value, custom
 
 $("btn-fill").addEventListener("click", () => {
   table.fill(pourColour);
-  setStatus("The whole tray is this colour now. Its grooves are untouched.");
+  baseColour = pourColour;
+  setStatus("The whole tray is this colour now, and the marble clears back to it.");
+});
+
+$("btn-reset-colour").addEventListener("click", () => {
+  baseColour = hexToRgb(SAND_COLOURS[0].hex);
+  table.fill(baseColour);
+  colourDirty = false;
+  setStatus("All the sand is back to its natural colour. Its grooves are untouched.");
 });
 
 $("btn-level").addEventListener("click", () => {
   sound.unlock();
   levelling = true;
-  if (follower && !follower.done && !playing) showPreview = true;
 });
 
 const soundBtn = $("btn-sound");
@@ -568,15 +768,18 @@ new ResizeObserver(resize).observe(stage);
 resize();
 marble.rest(table);
 
-// Open on a table already in progress rather than blank sand.
+// Open on a playlist already in progress rather than blank sand.
 const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-choosePattern("petals");
+for (const id of ["petals", "rose", "garden"] as PatternId[]) {
+  const p = PATTERNS.find((q) => q.id === id)!;
+  playlist.push({ label: p.label, kind: id, route: buildPattern(id, GW, GH, MARBLE_RADIUS * 3, MARBLE_RADIUS * 3), detail: 0, tint: false });
+}
+startItem(0);
 const headStart = follower!.total * (calm ? 1 : 0.3);
-while (follower!.travelled < headStart && !follower!.done) advance(1 / 60);
+while ((phase as Phase) === "draw" && follower!.travelled < headStart) advance(1 / 60);
 if (calm) {
   for (let i = 0; i < 60; i++) advance(1 / 60);
   playing = false;
-  updatePlayButton();
 }
-setStatus();
+refreshPlaylist();
 requestAnimationFrame(frame);

@@ -83,3 +83,31 @@ export function buildPattern(id: PatternId, w: number, h: number, margin: number
   }
   return pts;
 }
+
+/**
+ * The clearing route: a square spiral from the wall inward, ending at the
+ * centre, with passes `pitch` cells apart. Run with the marble in "wipe" mode
+ * (pitch a little under twice its wipe radius) it leaves the whole tray clean.
+ */
+export function buildWipe(w: number, h: number, margin: number, pitch: number): Point[] {
+  let x0 = margin;
+  let y0 = margin;
+  let x1 = w - 1 - margin;
+  let y1 = h - 1 - margin;
+  const pts: Point[] = [{ x: x0, y: y0 }];
+  while (x1 - x0 > pitch && y1 - y0 > pitch) {
+    pts.push({ x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }, { x: x0, y: y0 + pitch });
+    x0 += pitch;
+    y0 += pitch;
+    x1 -= pitch;
+    y1 -= pitch;
+    pts.push({ x: x0, y: y0 });
+  }
+  // what is left is a strip narrower than one pass: run down its middle
+  const mx = (x0 + x1) / 2;
+  const my = (y0 + y1) / 2;
+  if (y1 - y0 > x1 - x0) pts.push({ x: mx, y: y0 }, { x: mx, y: y1 });
+  else pts.push({ x: x0, y: my }, { x: x1, y: my });
+  pts.push({ x: (w - 1) / 2, y: (h - 1) / 2 });
+  return pts;
+}

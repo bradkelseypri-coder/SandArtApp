@@ -1,4 +1,4 @@
-import { SandTable } from "./sand.ts";
+import { SandTable, type RGB } from "./sand.ts";
 
 export type Point = { x: number; y: number };
 
@@ -17,7 +17,12 @@ export class Marble {
   readonly radius: number;
   /** spring stiffness of the magnet's pull: high follows a path tightly, low feels lazy */
   pull = 900;
-  /** total roll, used to animate the surface */
+  /**
+   * "draw" ploughs a groove. "wipe" is the clearing pass: the marble sweeps a
+   * wide band of sand flat and back to its plain colour, leaving no line.
+   */
+  mode: "draw" | "wipe" = "draw";
+  wipeTo: RGB = [216, 195, 156];
   rolled = 0;
   private sx: number;
   private sy: number;
@@ -26,6 +31,11 @@ export class Marble {
     this.x = this.tx = this.sx = x;
     this.y = this.ty = this.sy = y;
     this.radius = radius;
+  }
+
+  /** how far either side of the marble the clearing pass reaches */
+  get wipeRadius() {
+    return this.radius * 5.5;
   }
 
   get depth() {
@@ -67,7 +77,10 @@ export class Marble {
     const n = Math.ceil(dist / 0.8);
     for (let i = 1; i <= n; i++) {
       const f = i / n;
-      table.carve(this.sx + dx * f, this.sy + dy * f, this.radius, this.depth, ux, uy);
+      const px = this.sx + dx * f;
+      const py = this.sy + dy * f;
+      if (this.mode === "wipe") table.sweep(px, py, this.wipeRadius, 0.3, this.wipeTo);
+      else table.carve(px, py, this.radius, this.depth, ux, uy);
     }
     this.rolled += dist;
     this.sx = this.x;
@@ -100,6 +113,11 @@ export class PathFollower {
     }
     this.total = total;
     if (points.length < 2) this.done = true;
+  }
+
+  /** index of the stretch the magnet is on; 0 is the first one */
+  get segment() {
+    return this.seg;
   }
 
   get progress() {

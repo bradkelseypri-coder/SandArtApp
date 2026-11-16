@@ -122,7 +122,15 @@ export class SandTable {
         for (let x = x0; x <= x1; x++) {
           const px = x - cx;
           const d2 = px * px + py * py;
-          if (d2 < r2 || d2 >= R2) continue;
+          if (d2 >= R2) continue;
+          if (d2 < r2) {
+            // grains dragged along under the marble streak the groove floor
+            const c = (y * w + x) * 3;
+            color[c] += (cr - color[c]) * 0.22;
+            color[c + 1] += (cg - color[c + 1]) * 0.22;
+            color[c + 2] += (cb - color[c + 2]) * 0.22;
+            continue;
+          }
           const d = Math.sqrt(d2);
           let wt = 1 - (d - radius) / band;
           if (hasDir) {
@@ -134,7 +142,7 @@ export class SandTable {
           const i = y * w + x;
           const nh = height[i] + add;
           height[i] = nh > MAX_HEIGHT ? MAX_HEIGHT : nh;
-          const t = add / (add + 1.4);
+          const t = add / (add + 0.7);
           const c = i * 3;
           color[c] += (cr - color[c]) * t;
           color[c + 1] += (cg - color[c + 1]) * t;
@@ -159,6 +167,35 @@ export class SandTable {
         if (d2 >= r2) continue;
         const f = 1 - d2 / r2;
         height[y * w + x] *= 1 - strength * f;
+      }
+    }
+    this.markDirty(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
+  }
+
+  /**
+   * Wipe the slate: flatten the sand under a wide soft brush and return its
+   * colour toward `base`. This is what the marble does on its clearing pass.
+   */
+  sweep(cx: number, cy: number, radius: number, strength: number, base: RGB) {
+    const { w, h, height, color } = this;
+    const x0 = Math.max(0, Math.floor(cx - radius));
+    const x1 = Math.min(w - 1, Math.ceil(cx + radius));
+    const y0 = Math.max(0, Math.floor(cy - radius));
+    const y1 = Math.min(h - 1, Math.ceil(cy + radius));
+    const r2 = radius * radius;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+        if (d2 >= r2) continue;
+        // full strength over the middle of the band, fading only near its edge
+        const t = strength * Math.min(1, 2 * (1 - d2 / r2));
+        const i = y * w + x;
+        height[i] *= 1 - t;
+        const c = i * 3;
+        const j = (Math.random() - 0.5) * 14;
+        color[c] += (base[0] + j - color[c]) * t;
+        color[c + 1] += (base[1] + j - color[c + 1]) * t;
+        color[c + 2] += (base[2] + j - color[c + 2]) * t;
       }
     }
     this.markDirty(x0 - 1, y0 - 1, x1 + 1, y1 + 1);

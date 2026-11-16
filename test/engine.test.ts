@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SandTable } from "../src/engine/sand.ts";
 import { Marble, PathFollower } from "../src/engine/marble.ts";
-import { PATTERNS, buildPattern } from "../src/engine/patterns.ts";
+import { PATTERNS, buildPattern, buildWipe } from "../src/engine/patterns.ts";
 import { traceImage, findEdgeChains } from "../src/engine/imageTrace.ts";
 
 const sum = (a: Float32Array) => a.reduce((s, v) => s + v, 0);
@@ -53,6 +53,36 @@ test("the marble follows its magnet along a route and stays in the tray", () => 
     if (f.travelled > 60) worst = Math.max(worst, Math.hypot(m.x - p.x, m.y - p.y));
   }
   assert.ok(worst < 6, `marble lagged ${worst} cells behind the magnet`);
+});
+
+test("the clearing pass leaves the whole tray flat and plain again", () => {
+  for (const [w, h] of [[300, 620], [640, 300], [400, 400]]) {
+    const t = new SandTable(w, h, [216, 195, 156]);
+    const m = new Marble(w / 2, h / 2, 4);
+    // make a mess everywhere, corners included
+    for (let y = 2; y < h; y += 9) for (let x = 2; x < w; x += 9) t.carve(x, y, 4, 1.8);
+    t.pour(8, 8, 30, [20, 20, 220], 1);
+    m.mode = "wipe";
+    m.pull = 6000;
+    const f = new PathFollower([{ x: m.x, y: m.y }, ...buildWipe(w, h, 6, m.wipeRadius * 1.1)]);
+    let frames = 0;
+    while (!f.done || m.speed > 1.5) {
+      const p = f.advance(320 / 60);
+      m.tx = p.x;
+      m.ty = p.y;
+      m.step(1 / 60, t);
+      frames++;
+    }
+    let worst = 0;
+    let blue = -Infinity;
+    for (let i = 0; i < w * h; i++) {
+      worst = Math.max(worst, Math.abs(t.height[i]));
+      blue = Math.max(blue, t.color[i * 3 + 2] - t.color[i * 3]);
+    }
+    assert.ok(worst < 0.12, `${w}x${h}: relief of ${worst} left behind`);
+    assert.ok(blue < -35, `${w}x${h}: poured colour left behind (${blue})`);
+    assert.ok(frames / 60 < 45, `${w}x${h}: clearing took ${frames / 60}s`);
+  }
 });
 
 test("a picture of a dark square is traced around its outline as one line", () => {
